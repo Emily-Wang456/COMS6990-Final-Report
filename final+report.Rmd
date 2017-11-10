@@ -86,6 +86,8 @@ average.missing.rate <- missing.rate[, lapply(.SD, FUN = mean)]
 
 # the length of average missing rate less than 80%
 cat("the number of variables that missing rate less than 80% is", length(which(average.missing.rate < 0.8)))
+
+cat("the number of current countries is", length(unique(sub_mdat$Country.Name)))
 ```
 From code above, we narrow down 84 variables to 49. We'll do more investigation of these these 49 variable next week.
 ```{r data_merging}
