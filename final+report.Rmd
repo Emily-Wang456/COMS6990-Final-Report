@@ -108,7 +108,7 @@ chosen.variables.by.country<-missing.country[mean.missing<0.5,Country.Name]
 sub.mdat<-sub.mdat[Country.Name%in%chosen.variables.by.country]
 sub.mdat[,lapply(.SD,mean.missing),by=year]
 grep(pattern = "AIDS",x=names(sub.mdat),value = TRUE)
-sub.mdat[,by=Country.Name]
+sub.mdat[,]
 ```
 From code above, we narrow down 84 variables to 49. We'll do more investigation of these these 49 variable next week.
 ```{r data_merging}
