@@ -61,13 +61,13 @@ Since the original data set is a humongous dataset (348 columns in total), we wa
 ```{r subset}
 ##Subset the indicator we want and the data from 1990-2015
 data.table(category[1:10, ])
-sub_mdat<-mdat[year%in%1990:2015,.SD,.SDcols=c("Country.Code","Country.Name","year",unique(category$`Indicator Code`))]
+sub_mdat<-mdat[year%in%1990:2015,.SD,.SDcols=c("Country.Code","Country.Name","year",unique(category$`Indicator.Code`))]
 ##Use world bank Region Codelist to catefory data by region and subset only the region we want
 region<-region[, 1:3]
 sub_mdat<-merge(x=sub_mdat,y=region[,],by.y="Country Code",by.x="Country.Code",all.x=TRUE)
 sub_region<-c("Latin America & Caribbean","South Asia","Sub-Saharan Africa","Middle East & North Africa")
 sub_mdat<-sub_mdat[Region%in%sub_region,]
-data.table(sub_mdat[1:10, c(1:5)])
+data.table(sub_mdat[])
 ```
 
 
@@ -85,9 +85,30 @@ average.missing.rate <- missing.rate[, lapply(.SD, FUN = mean)]
 # which(average.missing.rate < 0.8)
 
 # the length of average missing rate less than 80%
-cat("the number of variables that missing rate less than 80% is", length(which(average.missing.rate < 0.8)))
+cat("the number of variables that missing rate more than 20% is", length(which(average.missing.rate < 0.2)))
 
-cat("the number of current countries is", length(unique(sub_mdat$Country.Name)))
+cat("\n the number of current countries is", length(unique(sub_mdat$Country.Name)))
+
+miss_less_20<-sub_mdat[,lapply(.SD,mean.missing)]
+
+miss_less_20<-which(sub_mdat[,lapply(.SD,mean.missing)]<.2)
+miss_less_20<-names(sub_mdat)[miss_less_20]
+missing_year<-sub_mdat[,lapply(.SD,mean.missing),by=year]
+Indicator[Indicator.Code%in%miss_less_20,]
+category[Indicator.Code%in%miss_less_20,]
+
+
+number.missing.years <- missing_year[, lapply(.SD, function(x) sum(x>0.7))]
+chosen.variables.by.year <-names(missing_year)[which(number.missing.years<24)]
+sub.mdat<-sub_mdat[,.SD,.SDcols=c("year",chosen.variables.by.year)]
+
+missing.country<-sub.mdat[,lapply(.SD,mean.missing),by=Country.Name]
+missing.country[,mean.missing:=rowMeans(missing.country[,-1])]
+chosen.variables.by.country<-missing.country[mean.missing<0.5,Country.Name]
+sub.mdat<-sub.mdat[Country.Name%in%chosen.variables.by.country]
+sub.mdat[,lapply(.SD,mean.missing),by=year]
+grep(pattern = "AIDS",x=names(sub.mdat),value = TRUE)
+sub.mdat[,by=Country.Name]
 ```
 From code above, we narrow down 84 variables to 49. We'll do more investigation of these these 49 variable next week.
 ```{r data_merging}
