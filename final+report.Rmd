@@ -11,7 +11,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r libraries, echo=FALSE}
 library(prettydoc)
 library(data.table)
-library(plyr)
+library(dplyr)
 library(Hmisc)
 library(DT)
 #library(rworldmap)
@@ -61,7 +61,7 @@ Since the original data set is a humongous dataset (348 columns in total), we wa
 ```{r subset}
 ##Subset the indicator we want and the data from 1990-2015
 data.table(category[1:10, ])
-sub_mdat<-mdat[year%in%1990:2015,.SD,.SDcols=c("Country.Code","Country.Name","year",unique(category$`Indicator.Code`))]
+sub_mdat<-mdat[year%in%1990:2015,.SD, .SDcols=c("Country.Code","Country.Name","year", unique(category$`Indicator.Code`))]
 ##Use world bank Region Codelist to catefory data by region and subset only the region we want
 region<-region[, 1:3]
 sub_mdat<-merge(x=sub_mdat,y=region[,],by.y="Country Code",by.x="Country.Code",all.x=TRUE)
