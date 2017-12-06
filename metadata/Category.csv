@@ -1,4 +1,4 @@
-Group,Indicator.Code,Indicator Name
+Group,Indicator.Code,Indicator.Name
 Finance,SH.XPD.EXTR.ZS,External resources for health (% of total expenditure on health)
 Finance,NY.GNP.PCAP.CD,"GNI per capita, Atlas method (current US$)"
 Finance,SH.XPD.PCAP,Health expenditure per capita (current US$)
@@ -68,9 +68,6 @@ Infection,SH.CON.1524.MA.ZS,"Condom use, population ages 15-24, male (% of males
 Infection,SP.DYN.CONU.ZS,"Contraceptive prevalence, any methods (% of women ages 15-49)"
 Infection,SP.DYN.CONM.ZS,"Contraceptive prevalence, modern methods (% of women ages 15-49)"
 Infection,SH.STA.BFED.ZS,Exclusive breastfeeding (% of children under 6 months)
-Population,SP.POP.TOTL.FE.IN,"Population, female"
-Population,SP.POP.TOTL.MA.IN,"Population, male"
-Population,SP.POP.TOTL,"Population, total"
 Population,SI.POV.NAHC,Poverty headcount ratio at national poverty line (% of population)
 Reproduction,SP.ADO.TFRT,"Adolescent fertility rate (births per 1,000 women ages 15-19)"
 Reproduction,SP.DYN.SMAM.FE,"Age at first marriage, female"
