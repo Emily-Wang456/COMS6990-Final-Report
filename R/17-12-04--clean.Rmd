@@ -1,0 +1,370 @@
+---
+title: "Final Project"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r libraries, echo=FALSE}
+library(prettydoc)
+library(data.table)
+library(plyr)
+library(Hmisc)
+library(DT)
+library(imputeTS)
+library(mice)
+#library(tseries)
+```
+
+## Introduction
+
+
+```{r read_data, echo=FALSE}
+
+dat <- fread(input = "~/Documents/GitHub/COMS6990-Final-Report/metadata/data.csv", verbose = FALSE)
+region<-fread(input = "~/Documents/GitHub/COMS6990-Final-Report/metadata/Metadata_Country_API_SH.HIV.INCD.ZS_DS2_en_csv_v2.csv", verbose = FALSE)
+category<- fread(input = "~/Documents/GitHub/COMS6990-Final-Report/metadata/Category.csv", verbose = FALSE)
+col.check <- fread(input = "~/Documents/GitHub/COMS6990-Final-Report/metadata/final_category.csv", verbose = FALSE)
+before.imputation  <- fread(input = "~/Downloads/before_imputation.csv", verbose = FALSE)
+# length(col.check$Indicator.Code)
+# length(unique(col.check$Indicator.Code))
+datatable(dat[1:10,])
+
+
+health.names <- col.check[Group == "Health service"]$Indicator.Code
+health.dat <- sub.mdat[,  ..health.names]
+health.dat[, lapply(.SD, mean.missing)]
+```
+
+## Data cleaning
+
+The main issue with the orignal data set is the structure and structural missing data. The columns of the orignal data are time series data and each row represents a specific indicator of a country. This structure is the transpose of the structure we usually use in R.So the first step of data cleaning is to adjust this dataset into a tidy dataset.
+
+```{r data_melt}
+#================================Missing Rate=========================
+##Remove the space in column name
+old_name<-names(dat)[1:4]
+new_name<-gsub(pattern = " ",replacement = ".",x=old_name)
+setnames(x=dat,old = old_name,new = new_name)
+##Stroe the indicator name and code into a new table and remove the indicator name from the original dataset.
+Indicator<-dat[,3:4]
+Indicator<-Indicator[,.(Indicator.Code=unique(Indicator.Code)),by=Indicator.Name]
+sum(dat[,!is.na(V61)])
+print("V61 is an emplty column")
+dat[,`:=`(Indicator.Name=NULL,V61=NULL)]
+##Reconstruct the data 
+id.vars<-names(dat)[1:3]
+measure.vars<-as.character(1960:2015)
+mdat<-melt(data = dat,id.vars=1:3, measure.vars=measure.vars, variable.name = "year",variable.factor = FALSE)
+mdat[, `:=`(value, mapvalues(x = value,from = "", to = NA))]
+mdat[,`:=`(year=as.numeric(year),value=as.numeric(value))]
+dcast_formula<-"Country.Code+Country.Name+year~Indicator.Code"
+mdat<-dcast(mdat[],dcast_formula)
+data.table(mdat[1:10, 1:5])
+```
+
+Since the original data set is a humongous dataset (348 columns in total), we want to pick up the variables that are only related to our analysis. To make futher analysis easier, we will classify each indicator and group the indicator that we are going to use in following analysis. To achieve this, first we manually picked 84
+```{r subset}
+##Subset the indicator we want and the data from 1990-2015
+data.table(category[1:10, ])
+sub_mdat_pre<-mdat[year%in%1990:2015,.SD,.SDcols=c("Country.Code","Country.Name","year",unique(category$`Indicator.Code`))]
+##Use world bank Region Codelist to catefory data by region and subset only the region we want
+region<-region[, 1:3]
+sub_mdat_pre<-merge(x=sub_mdat_pre,y=region[,],by.y="Country Code",by.x="Country.Code",all.x=TRUE)
+sub_region<-c("Latin America & Caribbean","South Asia","Sub-Saharan Africa","Middle East & North Africa")
+sub_mdat_pre<-sub_mdat_pre[Region%in%sub_region,]
+data.table(sub_mdat_pre[])
+```
+
+
+```{r data_cleaning}
+mean.missing <- function(x) {
+return(mean(is.na(x)))
+}
+# calcualte the missing rate for each column (variable) by year
+missing.rate <-sub_mdat_pre[,lapply(.SD, mean.missing),by=year]
+
+# evaluate the avarage missing rate for each column
+average.missing.rate <- missing.rate[, lapply(.SD, FUN = mean)]
+
+
+
+# the length of average missing rate less than 50%
+# cat("the number of variables that missing rate more than 20% is", length(which(average.missing.rate < 0.5)))
+# 
+# cat("\n the number of current countries is", length(unique(sub_mdat_pre$Country.Name)))
+##first we want to sub set the country which have the record of Prevalence of HIV
+
+
+
+##Data for linear regression
+HIV.prevalence<-c("SH.HIV.1524.FE.ZS","SH.HIV.1524.MA.ZS","SH.DYN.AIDS.ZS")
+HIV.prevalence.missing<-sub_mdat_pre[,lapply(.SD,mean.missing),by=Country.Name,.SDcols=HIV.prevalence]
+HIV.prevalence.missing[,sum.missing:=rowSums(HIV.prevalence.missing[,-1])]
+
+sub.country<-HIV.prevalence.missing[sum.missing==0,Country.Name]
+sub_mdat_pre<- sub_mdat_pre[Country.Name%in%sub.country,]
+  
+missing_year<-sub_mdat_pre[,lapply(.SD,mean.missing),by=year]
+
+# We calclate the missing value rate by year and figure out how many years have missing value rate over 0.7 for each indicator.
+number.missing.years <- missing_year[, lapply(.SD, function(x) sum(x>0.7))]
+# Next we calculate the total number of years that each indicator have missing value over 0.7. If a indicator has more than 24 years of missing value rate over 0.7, we will put it aside for now 
+chosen.variables.by.year <-names(missing_year)[which(number.missing.years<22)]
+sub.mdat<-sub_mdat_pre[,.SD,.SDcols=c("year",chosen.variables.by.year)]
+#length(unique(names(sub.mdat)))
+
+##export the data before imputing
+sub.mdat.plot.ts<-sub_mdat_pre[,]
+write.csv(x = sub.mdat, "~/Downloads/before_imputation.csv")
+total.missing.rate<-sub.mdat[,lapply(.SD,mean.missing),by=year]
+
+#Next we want to study the pattern of missing value rate and find out which is structural missing and which is random missing 
+total.missing.rate[,]
+#This function will return the number of different missing value an indicator have(except 1)
+missing.type<-function(x){
+  missing<-unique(x)
+  num.missing<-sum(missing!=1)
+  return(num.missing)
+}
+num.missing<-total.missing.rate[,lapply(.SD, missing.type)]
+
+# for indicators which have unique missing  value from beginning, we consider is structural missing and do not need futher process 
+
+structural.missing<-c("year",names(num.missing)[which(num.missing==1)])
+id.var<-c("year", "Country.Code","Country.Name", "Region","IncomeGroup")
+total.missing.rate[,.SD,.SDcols=c(id.var,names(num.missing)[names(num.missing)%nin%structural.missing])]
+```
+
+```{r}
+#===================================Linear Regression Model==========================
+round.numerics <- function(x, digits = 0, nearest = 1){
+  if(is.numeric(x)){
+    return(nearest * round(x = x/nearest, digits = digits))
+  }
+  else{
+    return(x)
+  }
+}
+
+logistic.regression.summary <- function(glm.mod, digits = 3) {
+  glm.coefs <- as.data.table(summary(glm.mod)$coefficients, keep.rownames = TRUE)
+  alpha = 0.05
+  z <- qnorm(p = 1 - alpha/2, mean = 0, sd = 1)
+  glm.coefs[, `:=`(Odds.Ratio, exp(Estimate))]
+  glm.coefs[, `:=`(OR.Lower.95, exp(Estimate - z * `Std. Error`))]
+  glm.coefs[, `:=`(OR.Upper.95, exp(Estimate + z * `Std. Error`))]
+  return(glm.coefs[])
+}
+
+linear.regression.summary <- function(lm.mod, digits = 3) {
+  lm.coefs <- as.data.table(summary(lm.mod)$coefficients, keep.rownames = TRUE)
+  alpha = 0.05
+  z <- qnorm(p = 1 - alpha/2, mean = 0, sd = 1)
+  lm.coefs[, `:=`(Odds.Ratio, exp(Estimate))]
+  lm.coefs[, `:=`(Coef.Lower.95, exp(Estimate - z * `Std. Error`))]
+  lm.coefs[, `:=`(Coef.Upper.95, exp(Estimate + z * `Std. Error`))]
+  return(lm.coefs)
+}
+
+
+fit.model <- function(dat, the.formula, digits = 3) {
+  dat <- as.data.table(dat)
+  the.outcome <- trimws(strsplit(x = the.formula, split = "~", fixed = TRUE)[[1]][1])
+  unique.values <- dat[, unique(get(the.outcome))]
+  unique.values <- unique.values[!is.na(unique.values)]
+  if (length(unique.values) == 2) {
+    mod <- glm(formula = the.formula, family = "binomial", data = dat)
+    mod.summary <- logistic.regression.summary(glm.mod = mod, digits = digits)
+  } else {
+    mod <- lm(formula = the.formula, data = dat)
+    mod.summary <- linear.regression.summary(lm.mod = mod, digits = digits)
+  }
+  mod.summary.rounded <- mod.summary[, lapply(X = .SD, FUN = "round.numerics", digits = digits)]
+  return(mod.summary.rounded)
+}
+
+#===================Linear Regression Analysis Before Imputation=====================
+hiv.var <- category[Group == "HIV"]$Indicator.Code
+cols.not.hiv <- names(sub.mdat)[names(sub.mdat) %nin% hiv.var]
+cols.in.formula <- cols.not.hiv[cols.not.hiv %nin% c("V1", "year", "Country.Code", "Country.Name")]
+cols.in.formula <- paste(cols.in.formula, collapse = "+")
+
+the.formula <- paste("SH.DYN.AIDS.ZS", "~", cols.in.formula)
+hiv.15.49.total <- fit.model(dat = sub.mdat, the.formula = the.formula)
+datatable(data = hiv.15.49.total)
+```
+
+```{r}
+##=================================Imputing by Time Series============================
+
+num.missing <- function(x) {
+return(sum(!is.na(x)))
+}
+
+
+##checking missing
+structural<-function(x){
+  lengths<-rle(x)$lengths
+  values<-rle(x)$values
+  if (values[1]==1){
+    length.structural<-lengths[1]
+  }
+  else{
+    length.structural<-0
+  }
+  return(length.structural)
+  
+}
+
+#num.missing
+num.structural<-total.missing.rate[,lapply(.SD,structural)]
+#time serise interpolation
+structural.imputation <- function(x,missing.number) {
+  missing.rate<-sum(is.na(x))/(length(x)-missing.number)
+  if(missing.rate>0.25){
+    return(x)
+  }else{
+    station.test <- Box.test(na.remove(x), lag = 2)
+    # test stationary, if not, don't impute, o/w, use ts to impute
+    if(station.test$p.value > 0.05 | is.nan(station.test$p.value)){
+    return(x)
+  }
+  else{
+    if(missing.number == 0){
+      x <- na.interpolation(x=x,option = "spline",method="natural")
+      return(x)
+    } else{
+        x[-(1:missing.number)]<-na.interpolation(x=x[-(1:missing.number)],option = "spline",method="natural")
+        return(x)
+    }
+  }
+  }
+}
+
+#sub.mdat[,lapply(.SD,structural.imputation,missing.number=0),by=Country.Name, .SDcols = "NY.GNP.PCAP.CD"]
+sub.mdat[,index:=1:.N]
+sub.impute.dat<-sub.mdat[,.(index)]
+
+for (i in 1:4) {
+  num<-unique(t(num.structural))[i]
+  
+  contain.structural<-names(num.structural)[which(t(num.structural)==num)]
+  
+  temp.dat<-sub.mdat[,lapply(.SD,structural.imputation,missing.number=num),by=Country.Name,.SDcols=c("index",contain.structural[contain.structural %nin% id.var])]
+  temp.dat[,`:=`(Country.Name=NULL)]
+  sub.impute.dat<-merge(sub.impute.dat,temp.dat,by="index")
+}
+
+sub.impute.dat<-merge(sub.mdat[,.SD,.SDcols=c("index",id.var)],sub.impute.dat,by="index")
+sub.impute.dat[,`:=`(index=NULL)]
+sub.mdat[,`:=`(index=NULL)]
+##sub.impute.dat isimputed datatable
+
+##-------Show resul---------------
+sub.impute.dat[,lapply(.SD,mean.missing),]
+sub.mdat[,lapply(.SD,mean.missing),.SDcols=names(sub.impute.dat)[]]
+##--------check difference after impute----------------
+#unify dimmension
+the.summary<-function(x){
+  if (sum(is.na(x))==0){
+    the.summary<-summary(x)
+    return(c(the.summary,"NA's"=0))
+  }
+  else{
+    the.summary<-summary(x)
+    return(the.summary)
+  }
+}
+
+value.var<-names(sub.mdat)[names(sub.mdat)%nin%id.var]
+impute.after<-sub.impute.dat[,lapply(.SD,the.summary),.SDcols=value.var]
+impute.before<-sub.mdat[,lapply(.SD,the.summary),.SDcols=value.var]
+
+diff.impute<-(impute.after[,lapply(.SD, as.numeric)]-impute.before[,lapply(.SD,as.numeric)])/impute.before[,lapply(.SD, as.numeric)]
+parameter<-names(sub.mdat[,summary(NY.GNP.PCAP.CD)])
+diff.impute[,patameter:=parameter]
+diff.impute[,.SD,by="parameter"]
+```
+From code above, we narrow down 71 variables to 49. We'll do more investigation of these these 49 variable next week.
+```{r data_merging}
+# region<-as.data.table(countryRegions[,c("ISO3","REGION")])
+# mdat<-merge(x=mdat,y=region,by.y="ISO3",by.x="Country.Code",all.x=TRUE)
+#grep(pattern = "AIDS",x=names(sub.mdat),value = TRUE)
+
+#===================================Impute by IncomeGroup function===============================
+imputation.by.income <- function(x){
+  missing <- which(is.na(x))
+  if(length(missing) != 0){
+    x[missing] <- as.double(median(x, na.rm = TRUE))
+  }
+  return(x)
+}
+
+#=================================Start Imputing by IncomeGroup after time series=================
+# calculate current missing rate
+# build an index column for convenience
+sub.impute.dat$V1 <- seq.int(nrow(sub.impute.dat))
+#sub.impute.dat[, "V1"] <- sapply(sub.impute.dat[, "V1"], as.numeric)
+after.ts.missing.rate <- sub.impute.dat[, lapply(.SD, FUN = mean.missing)]
+missing.not.zero <- names(after.ts.missing.rate)[which(after.ts.missing.rate != 0)]
+
+#==================Finance Group Imputing by IncomeGroup=============
+income.related.colname <- category[Group == "Finance" & Indicator.Code %in% missing.not.zero]$Indicator.Code
+income.related.cols <- c("V1", income.related.colname)
+imputed.by.income.group <- sub.impute.dat[, lapply(.SD, imputation.by.income), .SDcols = income.related.cols, by = c("year", "IncomeGroup")]
+
+setorderv(imputed.by.income.group, "V1")
+
+#=======comparison========
+# the result is the missing rate decreased by impution of using income group
+sub.impute.dat[, lapply(.SD, mean.missing), .SDcols = income.related.cols] - imputed.by.income.group[, lapply(.SD, FUN = mean.missing)][, -c(1,2)]
+
+#=======merging===========
+result.missing.after.income <- imputed.by.income.group[, lapply(.SD, FUN = mean.missing)]
+# from above, since the missing rate is same, it's reasonable to believe that they are structural missing, and it's confirmed by inspection
+
+# merge 
+after.finance.income <- merge(sub.impute.dat[, !(income.related.colname), with = FALSE],  imputed.by.income.group[, -c(1,2)], by = "V1")
+
+
+#====================================Eduction Group Imputing by IncomeGroup=======================
+education.related.colnames <- category[Group == "Education" & Indicator.Code %in% missing.not.zero]$Indicator.Code
+education.related.cols <- c("V1", education.related.colnames)
+education.imputed.by.income <- sub.impute.dat[, lapply(.SD, imputation.by.income), .SDcols = education.related.cols, by = c("year", "IncomeGroup")]
+setorderv(education.imputed.by.income, "V1")
+
+# ========comparision======
+sub.impute.dat[, lapply(.SD, mean.missing), .SDcols = education.related.cols] - education.imputed.by.income[, lapply(.SD, FUN = mean.missing)][, -c(1,2)]
+
+#=========merging===========
+after.edu.finance <- merge(sub.impute.dat[, !(education.related.colnames), with = FALSE],  education.imputed.by.income[, -c(1,2)], by = "V1")
+
+
+
+#===================================Health Service Imputing by IncomeGroup=======================
+health.related.colnames <- category[Group == "Health service" & Indicator.Code %in% missing.not.zero]$Indicator.Code
+health.related.cols <- c("V1", health.related.colnames)
+health.imputed.by.income <- sub.impute.dat[, lapply(.SD, imputation.by.income), .SDcols = health.related.cols, by = c("year", "IncomeGroup")]
+setorderv(education.imputed.by.income, "V1")
+
+#=======comparision=========
+sub.impute.dat[, lapply(.SD, mean.missing), .SDcols = health.related.cols] - health.imputed.by.income[, lapply(.SD, FUN = mean.missing)][, -c(1,2)]
+
+#=======merging=============
+after.edu.finance.health <- merge(sub.impute.dat[, !(education.related.colnames), with = FALSE],  education.imputed.by.income[, -c(1,2)], by = "V1")
+
+after.edu.finance.health$V1 <- NULL
+sub.impute.dat$V1 <- NULL
+after.imputation <- after.edu.finance.health
+write.csv(x = after.imputation, "~/Downloads/after_imputation.csv")
+```
+
+```{r}
+#========================================Missing Rate Comparison==================================
+sub.mdat[, lapply(.SD, mean.missing)] - sub.impute.dat[, lapply(.SD, mean.missing)] - (sub.impute.dat[, lapply(.SD, mean.missing)] - after.imputation[, lapply(.SD, mean.missing)])
+```
+

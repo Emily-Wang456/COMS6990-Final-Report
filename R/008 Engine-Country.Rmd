@@ -1,0 +1,449 @@
+---
+title: "Team Bazinga! Reporting Engine"
+output: flexdashboard::flex_dashboard
+runtime: shiny
+---
+
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(shiny)
+library(rmarkdown)
+library(knitr)
+library(Hmisc)
+library(DT)
+library(ggplot2)
+library(splines)
+
+library(data.table)
+assignInNamespace("cedta.override", c(data.table:::cedta.override,"rmarkdown"), "data.table")
+
+opts_chunk$set(echo = FALSE, comment="", warning = FALSE, message = FALSE, tidy.opts=list(width.cutoff=55), tidy = TRUE)
+
+```
+
+
+```{r read_data, include=FALSE}
+#dat <- fread(input = "../data/data.csv")
+plot.dat <- fread(input = "../data/before_imputation.csv")
+i.plot.dat <- fread(input = "../data/after_imputation.csv")
+cat.dat <- fread(input = "../data/Final category.csv")
+# clean.dat<-fread(input = "../data/cleaned data.csv")
+```
+
+
+```{r define_variables}
+unique.regions <- plot.dat[, unique(Region)]
+unique.countries <- plot.dat[, unique(Country.Name)]
+unique.category <- cat.dat[, unique(Group)]
+unique.income.group <- plot.dat[, unique(IncomeGroup)]
+unique.year <- c("All", as.character(plot.dat[, unique(year)]))
+unique.indicator<-cat.dat[, unique(Indicator.Code)]
+
+distribution.variable <- c("Region", "IncomeGroup", "year")
+global.finance.variable <- c("IncomeGroup", cat.dat[Group=="Finance", Indicator.Code])
+finance.variable <- cat.dat[Group=="Finance", Indicator.Code]
+health.variable <- cat.dat[Group=="Health service", Indicator.Code]
+hiv.variable <- cat.dat[Group=="HIV", Indicator.Code]
+hiv.name <- cat.dat[Group=="HIV", Indicator.Name]
+education.variable <- cat.dat[Group=="Education", Indicator.Code]
+infection.variable <- cat.dat[Group=="Infection", Indicator.Code]
+Global.population.variable <- c("Region", cat.dat[Group=="Population", Indicator.Code])
+population.variable <- cat.dat[Group=="Population", Indicator.Code]
+reproduction.variable <- cat.dat[Group=="Reproduction", Indicator.Code]
+
+```
+
+```{r functions}
+percentage.table <- function(x, digits = 1){
+  tab <- table(x)
+  percentage.tab <- 100*tab/(sum(tab))
+  rounded.tab <- round(x = percentage.tab, digits = digits)
+  return(rounded.tab)
+}
+
+round.numerics <- function(x, digits){
+  if(is.numeric(x)){
+    x <- round(x = x, digits = digits)
+  }
+  return(x)
+}
+
+```
+
+Introduction
+===================================== 
+
+Inputs {.sidebar}
+-------------------------------------
+```{r}
+h1("Introduction")
+hr("We are analyzing data from the World bank covering a variety of key health, nutrition and population statistics.")
+p("")
+br("The dataset contains 258 countries and covered 55 years.")
+hr("Click on the tabs to see different reports.")
+
+```
+
+
+Outputs
+----------------------------------
+
+```{r intro}
+renderImage({
+    
+    outfile <- "../pic/worldmap.png"
+    list(src = outfile,
+         contentType = 'image/png',
+         width=1000, height=542)
+        
+  }, deleteFile = FALSE)
+
+```
+
+
+Annual Prevelence
+=====================================  
+
+Inputs {.sidebar}
+-------------------------------------
+
+
+
+```{r HIV_prevelence_input}
+      selectInput(inputId = "HIV.region", label = "Select Region:", choices = unique.regions, selected = unique.regions[1])
+      selectInput(inputId = "HIV.country.name", label = "Select Country:", choices = unique.countries, selected = NULL)
+      selectInput(inputId = "HIV.indicator", label = "Select the Indicator:", choices = hiv.name, selected = hiv.name[3])
+      sliderInput(inputId= "HIV.year.number", label = "Timeline", min = 1990, max = 2015, value = c(1990, 2015), step = 1, round = FALSE, sep = "", pre = NULL, post = NULL, timezone = NULL, dragRange = TRUE)
+
+      
+observe({
+    HIV.selected.countries <- plot.dat[Region==input$HIV.region, unique(Country.Name)]
+    updateSelectInput(session = session, inputId = "HIV.country.name", label = paste("Select Country:"), choices = HIV.selected.countries, selected = HIV.selected.countries)
+})
+```
+
+
+Outputs
+----------------------------------
+```{r rbind_before_imputated_dat}
+pre.plot.dat <- plot.dat[, `:=`(Version, "Before")]
+aft.plot.dat <- i.plot.dat[, `:=`(Version, "After")]
+new.plot.dat <- rbind(pre.plot.dat, aft.plot.dat)
+```
+
+```{r HIV_prevelence_renderplot}
+renderPlot({
+  HIV.indicator.code <- cat.dat[Indicator.Name==input$HIV.indicator, Indicator.Code]
+  HIV.sub.dat <- new.plot.dat[Country.Name==input$HIV.country.name&year%in%input$HIV.year.number[1]:input$HIV.year.number[2], .(Version, year, Indicator=get(HIV.indicator.code))]
+
+    HIV.pre.p <- ggplot(HIV.sub.dat, aes(x = year, y = Indicator, colour = Version, linetype = Version, fill = Version)) + 
+      geom_line() + 
+      geom_point() +
+      labs(title = "Country Annual HIV Prevelence")
+    HIV.pre.p + theme(panel.background = element_rect(fill = "white", colour = "grey50"))
+    HIV.pre.p + theme(panel.border = element_rect(linetype = "dashed", fill = NA))
+    HIV.pre.p + theme(panel.grid.major = element_line(colour = "black"))
+    HIV.pre.p + theme(
+      panel.grid.major.y = element_blank(),
+      panel.grid.minor.y = element_blank()
+    )
+})
+
+```
+
+Prevelence Ranking
+===================================
+
+Inputs {.sidebar}
+-----------------------------------------------------------------------
+```{r prevelence_ranking_input}
+  selectInput(inputId = "pr.indicator.name", label = "Select the Indicator:", choices = hiv.name, selected = hiv.name[3])
+  selectInput(inputId = "pr.year.number", label = "Select Year:", choices = unique.year[-1], selected = unique.year[2])
+  sliderInput(inputId= "pr.num.rank", label = "Show Countries Above:", min = 1, max = 20, value =  5, step = 1, round = FALSE, sep = "", pre = NULL, post = NULL, timezone = NULL, dragRange = TRUE)
+  selectInput(inputId = "pr.order", label = "Select the Ranking Order:", choices = c("Descending", "Ascending"), selected = "Descending")
+
+
+      
+
+
+ 
+```
+
+Outputs
+----------------------------------
+```{r prevelence_ranking_output}
+renderPlot({
+   pr.indicator.code <- cat.dat[Indicator.Name==input$pr.indicator.name, Indicator.Code]
+   pr.sub.dat <- plot.dat[year%in%input$pr.year.number, .(Country.Name, year, Indicator=get(pr.indicator.code))]
+   pr.sub.dat.a <- pr.sub.dat
+   setorderv(x = pr.sub.dat.a, cols = "Indicator", order=1, na.last=FALSE)
+   pr.sub.dat.d <- pr.sub.dat
+   setorderv(x = pr.sub.dat.d, cols = "Indicator", order=-1, na.last=FALSE)
+   pr.sub.dat.a.p <- pr.sub.dat.a[1:input$pr.num.rank, ]
+   pr.sub.dat.d.p <- pr.sub.dat.d[1:input$pr.num.rank, ]
+if(input$pr.order=="Descending"){
+  HIV.rank.p <- ggplot(pr.sub.dat.d.p, aes(x = reorder(Country.Name, -Indicator), y = Indicator))
+        HIV.rank.p + 
+          geom_bar(stat="identity", colour="Black") + 
+          geom_text(aes(label=Indicator), vjust=1.5, colour="white") +
+          labs(x = "Country Name") +
+          labs(title=input$pr.indicator.name)
+}
+   else{
+  HIV.rank.p <- ggplot(pr.sub.dat.a.p, aes(x = reorder(Country.Name, Indicator), y = Indicator))
+        HIV.rank.p + 
+          geom_bar(stat="identity", colour="Black") +
+          geom_text(aes(label=Indicator), vjust=1.5, colour="white") +
+          labs(x = "Country Name") +
+          labs(title=input$pr.indicator.name)
+   }
+})
+
+```
+
+
+HIV Distribution
+=====================================  
+
+Inputs {.sidebar}
+-------------------------------------
+
+
+
+```{r HIV_distribution_input}
+      selectInput(inputId = "HIV.distribution.indicator", label = "Select the Indicator:", choices = hiv.name, selected = hiv.name[3])      
+      selectInput(inputId = "HIV.distribution.variable", label = "Select Vaviable:", choices = distribution.variable, selected = distribution.variable[1])
+      selectInput(inputId = "HIV.distribution.year", label = "Select Year:", choices = unique.year, selected = unique.year[1])
+observe({
+    x<-input$HIV.distribution.variable 
+    if("year"%in% x){
+      update.year<-character(0)
+    }
+    else{
+      update.year <- unique.year
+    }
+    updateSelectInput(session = session, inputId = "HIV.distribution.year", label = "Select Year:", choices = update.year, selected = update.year[1])
+})
+      
+```
+
+
+Outputs
+----------------------------------
+
+
+```{r HIV_distribution_renderplot}
+renderPlot({
+    HIV.indicator.code <- cat.dat[Indicator.Name==input$HIV.distribution.indicator, Indicator.Code]
+    HIV.dis.plot.dat <- plot.dat[, .(Region, year, IncomeGroup, Indicator=get(HIV.indicator.code))]
+    if(input$HIV.distribution.variable != "year"){
+      if(input$HIV.distribution.year != "All"){
+        HIV.dis.dat <- HIV.dis.plot.dat[year==input$HIV.distribution.year,]
+      }
+      else{
+        HIV.dis.dat <- HIV.dis.plot.dat
+      }
+      HIV.dis.p <- ggplot(HIV.dis.dat, aes(x = get(input$HIV.distribution.variable), y = log(Indicator)))
+        HIV.dis.p + 
+          geom_boxplot() +
+          labs(x = input$HIV.distribution.variable) +
+          labs(title=sprintf("HIV Distribution by %s", input$HIV.distribution.variable))
+    } 
+    else {
+      HIV.dis.dat <- HIV.dis.plot.dat
+      HIV.dis.dat[, year:=as.character(year)]
+      HIV.dis.p <- ggplot(HIV.dis.dat, aes(x = year, y = log(Indicator)))
+      HIV.dis.p + 
+        geom_boxplot() +
+        labs(title="HIV Distribution by Year")
+    }
+    })
+
+
+```
+
+
+Global Regression
+===================================
+
+Inputs {.sidebar}
+-----------------------------------------------------------------------
+
+
+```{r regression_function}
+round.numerics <- function(x, digits = 0, nearest = 1){
+  if(is.numeric(x)){
+    return(nearest * round(x = x/nearest, digits = digits))
+  }
+  else{
+    return(x)
+  }
+}
+
+linear.regression.summary <- function(lm.mod, digits = 3) {
+lm.coefs <- as.data.table(summary(lm.mod)$coefficients,
+keep.rownames = TRUE)
+alpha = 0.05
+z <- qnorm(p = 1 - alpha/2, mean = 0, sd = 1)
+lm.coefs[, `:=`(Coef.Lower.95, Estimate - z * `Std. Error`)]
+lm.coefs[, `:=`(Coef.Upper.95, Estimate + z * `Std. Error`)]
+return(lm.coefs)
+}
+
+logistic.regression.summary <- function(glm.mod, digits = 3) {
+glm.coefs <- as.data.table(summary(glm.mod)$coefficients,
+keep.rownames = TRUE)
+alpha = 0.05
+z <- qnorm(p = 1 - alpha/2, mean = 0, sd = 1)
+glm.coefs[, `:=`(Odds.Ratio, exp(Estimate))]
+glm.coefs[, `:=`(OR.Lower.95, exp(Estimate - z * `Std. Error`))]
+glm.coefs[, `:=`(OR.Upper.95, exp(Estimate + z * `Std. Error`))]
+return(glm.coefs[])
+}
+
+fit.model <- function(dat, the.formula, digits = 3) {
+dat <- as.data.table(dat)
+the.outcome <- trimws(strsplit(x = the.formula, split = "~",
+fixed = TRUE)[[1]][1])
+unique.values <- dat[, unique(get(the.outcome))]
+unique.values <- unique.values[!is.na(unique.values)]
+if (length(unique.values) == 2) {
+mod <- glm(formula = the.formula, family = "binomial",
+data = dat)
+mod.summary <- logistic.regression.summary(glm.mod = mod,
+digits = digits)
+} 
+else {
+mod <- lm(formula = the.formula, data = dat)
+mod.summary <- linear.regression.summary(lm.mod = mod,
+digits = digits)
+}
+mod.summary.rounded <- mod.summary[, lapply(X = .SD,
+FUN = "round.numerics", digits = digits)]
+return(mod.summary.rounded)
+}
+
+
+reduce.formula <- function(dat, the.initial.formula) {
+  dat <- as.data.table(dat)
+  the.sides <- strsplit(x = the.initial.formula, split = "~")[[1]]
+  the.pieces.untrimmed <- strsplit(x = the.sides[2], split = "+",fixed = TRUE)[[1]]
+  the.pieces <- trimws(x = the.pieces.untrimmed, which = "both")
+  num.variables <- length(the.pieces)
+  include.pieces <- logical(num.variables)
+  for (i in 1:num.variables) {
+    unique.values <- dat[, unique(get(the.pieces[i]))]
+    if (length(unique.values) < 2) {
+      include.pieces[i] <- FALSE
+    } 
+    else {
+      include.pieces[i] <- TRUE
+    }
+  } 
+  rhs <- paste(the.pieces[include.pieces == TRUE], collapse = " + ")
+  the.formula <- sprintf("%s ~ %s", trimws(x = the.sides[1]), rhs)
+  return(the.formula)
+}
+
+```
+
+```{r global_regression_input}
+  selectInput(inputId = "lm.indicator", label = "Select the Indicator:", choices = hiv.name, selected = hiv.name[5])
+  selectInput(inputId = "lm.category", label = "Select Category:", choices = unique.category, selected = unique.category)
+  selectInput(inputId = "lm.income.group", label = "Select Income Group:", choices = unique.income.group, selected = unique.income.group, multiple = TRUE)
+  selectInput(inputId = "lm.region", label = "Select Region:", choices = unique.regions, selected = unique.regions, multiple = TRUE)
+  sliderInput(inputId= "lm.year.number", label = "Timeline", min = 1990, max = 2015, value = c(1990, 2015), step = 1, round = FALSE, sep = "", pre = NULL, post = NULL, timezone = NULL, dragRange = TRUE)
+  selectInput(inputId = "lm.name", label = "Select the Indicator Code to Show Indicator Name:", choices = names(plot.dat), selected = NULL)    
+observe({
+    lm.selected.indicator <- cat.dat[Group==input$lm.category, Indicator.Code]
+    updateSelectInput(session = session, inputId = "lm.name", label = "Select the Indicator Code to Show Indicator Name:", choices = lm.selected.indicator, selected = lm.selected.indicator[1])
+})
+  renderText({
+    cat.dat[Indicator.Code==input$lm.name,Indicator.Name]})
+      
+      
+      
+     
+
+ 
+```
+
+
+Outputs
+----------------------------------
+```{r global_regression_output }
+renderTable({
+  lm.indicator.code <- cat.dat[Indicator.Name==input$lm.indicator, Indicator.Code]
+  lm.sub.dat <- plot.dat[year%in%input$lm.year.number[1]:input$lm.year.number[2]&Region%in%input$lm.region&IncomeGroup%in%input$lm.income.group, ]
+  
+   if(input$lm.category=="Finance"){
+     measurment<-c("IncomeGroup",cat.dat[Group==input$lm.category,Indicator.Code])
+   }
+   else if (input$lm.category=="Population"){
+     measurment<-c("Region",cat.dat[Group==input$lm.category,Indicator.Code])
+   }else{
+     measurment<-cat.dat[Group==input$lm.category,Indicator.Code]
+   }
+   the.variable<-toString(x=measurment)
+   the.variable<-gsub(pattern = ", ",replacement = "+",x=the.variable)
+   the.formula<-paste(lm.indicator.code,the.variable,sep = "~")
+   the.formula<-reduce.formula (lm.sub.dat,the.formula)
+   lm.result<-fit.model(lm.sub.dat,the.formula)
+   data.table(lm.result)
+})
+
+```
+
+Regression Plot
+===================================
+
+Inputs {.sidebar}
+-----------------------------------------------------------------------
+```{r lm plot input}
+ selectInput(inputId = "lmp.indicator.y", label = "Select Y Indicator:", choices = hiv.name, selected = hiv.name[5])
+  selectInput(inputId = "lmp.category", label = "Select Category:", choices = unique.category, selected = unique.category)
+  selectInput(inputId = "lmp.indicator.x", label = "Select X Indicator:", choices = unique.indicator, selected = unique.indicator[1])
+  renderText({
+  cat.dat[Indicator.Code==input$lmp.indicator.y,Indicator.Name]})
+  checkboxGroupInput(inputId = "lmp.by",label = "Select facet",choices = distribution.variable[-3],selected = NULL)
+   observe({
+     lmp.selected.indicator <- cat.dat[Group==input$lmp.category, Indicator.Code]
+     updateSelectInput(session = session, inputId = "lmp.indicator.x", label = "Select X Indicator:", choices =      lmp.selected.indicator, selected = lmp.selected.indicator[1])
+ })
+
+```
+
+
+
+Outputs
+----------------------------------
+```{r lm plot onput}
+  renderPlot({
+  lab.y<-input$lmp.indicator.y
+  lab.x<-cat.dat[Indicator.Name==input$lmp.indicator.x, Indicator.Name]
+   lmp.indicator.code <- cat.dat[Indicator.Name==input$lmp.indicator.y, Indicator.Code]
+   lm.plot<-ggplot(i.plot.dat, aes(y=get(lmp.indicator.code), x=get(input$lmp.indicator.x))) + 
+            geom_point() +
+            geom_smooth(method ="lm")+
+            xlab(lab.x)+
+            ylab(lab.y)
+     
+     
+   if (length(input$lmp.by)==2){
+     facet.a<-input$lmp.by[1]
+     facet.b<-input$lmp.by[2]
+     lm.plot<-lm.plot+facet_grid(get(facet.a) ~ get(facet.b))
+   }
+   else if(length(input$lmp.by)==1){
+     facet.a<-input$lmp.by
+     lm.plot<-lm.plot+facet_grid(get(facet.a) ~ .)
+   }
+  
+   
+   lm.plot
+})
+  
+
+
+```

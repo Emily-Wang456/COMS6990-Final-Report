@@ -1,0 +1,65 @@
+---
+title: "datamap"
+author: "lw"
+date: "12/2/2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{r}
+library(readr)
+library(dplyr)
+library(DT)
+library(data.table)
+library(reshape2)
+
+dat <- fread(input = "~/Downloads/hiv_map.csv")
+dat
+names(dat) <- c("country", "country_code", "year", "hiv")
+dat[, `:=`(country_code, NULL)]
+#reshape(dat, idvar = "country", timevar = "year", value.var = "hiv", direction = "wide")
+reshaped.dat <- dcast(dat, country ~ year, value.var = "hiv")
+```
+
+```{r}
+#library(ggplot2)
+library(maps)
+library(ggthemes)
+library(rworldmap)
+library(animation)
+# world <- ggplot() +
+#   borders("world", colour = "gray85", fill = "gray80") +
+#   theme_map() 
+# 
+# map <- world +
+#   geom_point(aes(x = lon, y = lat, size = followers),
+#              data = rladies, 
+#              colour = 'purple', alpha = .5) +
+#   scale_size_continuous(range = c(1, 8), 
+#                         breaks = c(250, 500, 750, 1000)) +
+#   labs(size = 'Followers')
+#years <- c("X2011","X2011","X2012","X2013","X2014")
+
+match.country <- joinCountryData2Map(reshaped.dat, joinCode="NAME", nameJoinColumn="country")
+year <- 1990:2015
+
+mapCountryData(match.country, nameColumnToPlot="2015")
+
+
+```
+```{r}
+tem.dat <- fread(input = "~/Downloads/temp data.csv", verbose = FALSE)
+
+chosen.dat <- dat[country %in% tem.dat$Country.Name]
+
+ggplot(data = chosen.dat, aes(x = year, y = hiv, group = country, colour = country)) +
+  geom_line()
+```
+```{r}
+
+
