@@ -18,12 +18,47 @@ library(DT)
 library(data.table)
 library(reshape2)
 
-dat <- fread(input = "~/Downloads/hiv_map.csv")
+dat <- fread(input = "../data/before_imputation.csv")
 dat
-names(dat) <- c("country", "country_code", "year", "hiv")
-dat[, `:=`(country_code, NULL)]
-#reshape(dat, idvar = "country", timevar = "year", value.var = "hiv", direction = "wide")
-reshaped.dat <- dcast(dat, country ~ year, value.var = "hiv")
+#names(dat) <- c("country", "country_code", "year", "hiv")
+#dat[, `:=`(country_code, NULL)]
+current <- fread(input = "../data/after_imputation.csv")
+before <- fread(input = "../data/before_imputation.csv")
+population <- fread(input = "../data/population.csv")
+length(unique(current$Country.Name))
+current.pop <- population[`Country Name` %in% current$Country.Name]
+pop.table <- current.pop[, .SD,.SDcols = a]
+a<-c("Country Name",as.character(1990:2015))
+names(pop.table)[1] <- "Country.Name"
+#which(is.na(pop.table))
+
+pop.reshape <- melt(data = pop.table, id.vars = "Country.Name", value.name = "SP.POP.TOTL")
+names(pop.reshape)[2] <- "year"
+pop.reshape[,year:=as.integer(as.character(year))]
+with.population <- merge(after.imputation, pop.reshape, by = c("Country.Name", "year"),all=TRUE)
+
+population.percent<- c("SH.MED.BEDS.ZS","SH.MED.NUMW.P3","SH.MED.PHYS.ZS","SH.HIV.TOTL","SH.HIV.INCD.TL","SH.DYN.AIDS","SH.HIV.INCD","SH.DYN.AIDS.DH","SH.HIV.0014","SH.HIV.INCD.14","SH.HIV.ORPH","SH.DTH.IMRT","SH.MMR.DTHS","SH.DTH.NMRT")
+with.population[,SP.POP.TOTL:=as.numeric(SP.POP.TOTL)]
+hiv.percent <- with.population[,.SD, .SDcols = population.percent]/with.population$SP.POP.TOTL*1000
+ 
+with.population.percentage <- cbind(with.population[, !(population.percent), with = FALSE],  hiv.percent)
+with.population.percentage[, `:=`(V1, NULL)]
+write.csv(with.population.percentage, "~/Downloads/final_dat.csv")
+
+
+before.with.pop <- merge(before, pop.reshape, by = c("Country.Name", "year"), all = TRUE)
+before.with.pop[,SP.POP.TOTL:=as.numeric(SP.POP.TOTL)]
+before.hiv.percent <- before.with.pop[,.SD, .SDcols = population.percent]/with.population$SP.POP.TOTL*1000
+
+before.with.pop.per <- cbind(before.with.pop[, !(population.percent), with = FALSE], before.hiv.percent)
+before.with.pop.per[, `:=`(V1, NULL)]
+write.csv(before.with.pop.per, "~/Downloads/final_before.csv")
+#
+
+
+subdat <- dat[, c("year","Country.Code", "Country.Name", "SH.DYN.AIDS.ZS")]
+
+reshaped.dat <- dcast(subdat, Country.Name ~ year, value.var = "SH.DYN.AIDS.ZS")
 ```
 
 ```{r}
@@ -32,6 +67,8 @@ library(maps)
 library(ggthemes)
 library(rworldmap)
 library(animation)
+library(classInt)
+library(RColorBrewer)
 # world <- ggplot() +
 #   borders("world", colour = "gray85", fill = "gray80") +
 #   theme_map() 
@@ -45,12 +82,31 @@ library(animation)
 #   labs(size = 'Followers')
 #years <- c("X2011","X2011","X2012","X2013","X2014")
 
-match.country <- joinCountryData2Map(reshaped.dat, joinCode="NAME", nameJoinColumn="country")
-year <- 1990:2015
+match.country <- joinCountryData2Map(reshaped.dat, joinCode="NAME", nameJoinColumn="Country.Name")
+year <- c("2000", "2001", "2002")
+saveGIF({
+  for(i in year){
+    colourPalette <- brewer.pal(5, 'RdPu')
+    mapCountryData(match.country, nameColumnToPlot="2015", missingCountryCol = gray(.8), colourPalette = colourPalette)
+  }
+}, interval = 1, movie.name = "world_map.gif", ani.width = 800, ani.height = 600)
+mapDevice()
+#classInt <- classIntervals(match.country, n = 5, style = "jenks")
+colourPalette <- brewer.pal(8, 'RdPu')
+# plotvar <- reshaped.dat$`2008`
+# class <- classIntervals(plotvar, nclr, style = "fixed", fixedBreaks = seq(min, max, breaks))
+# colcode <- findColours(class, plotclr)
+# # library(OIdata)
+# # data(state)
+# #catMethod <- classInt
+# nclr <- 8 # number of bins
+# min <- 0 # theoretical minimum
+# max <- 30 # theoretical maximum
+# breaks <- (max - min) / nclr
 
-mapCountryData(match.country, nameColumnToPlot="2015")
-
-
+mapParams <- mapCountryData(match.country, nameColumnToPlot="2008", missingCountryCol = gray(.8), colourPalette = colourPalette, catMethod = c(0,5,10,15,20,25,30))
+#do.call(addMapLegend, c(mapParams, legendLabels = "all", legendWidth = 0.5, legendIntervals = "data", legendMar = 2))
+#legend("bottomleft", legend = names(attr(colcode, "table")), fill = attr(colcode, "palette"), cex = 0.56, bty = "n")
 ```
 ```{r}
 tem.dat <- fread(input = "~/Downloads/temp data.csv", verbose = FALSE)
@@ -60,6 +116,11 @@ chosen.dat <- dat[country %in% tem.dat$Country.Name]
 ggplot(data = chosen.dat, aes(x = year, y = hiv, group = country, colour = country)) +
   geom_line()
 ```
-```{r}
 
+
+```{r}
+library(VIM)
+missing_plot <- aggr(current, col = c('navyblue', 'red'), numbers = TRUE, sortVars = TRUE, labels = names(current))
+
+```
 

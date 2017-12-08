@@ -15,28 +15,18 @@ library(plyr)
 library(Hmisc)
 library(DT)
 library(imputeTS)
-library(mice)
-#library(tseries)
+library(reshape2)
 ```
 
 ## Introduction
 
 
 ```{r read_data, echo=FALSE}
+dat <- fread(input = "../data/data.csv", verbose = FALSE)
+region<-fread(input = "../data/Metadata_Country_API_SH.HIV.INCD.ZS_DS2_en_csv_v2.csv", verbose = FALSE)
+category<- fread(input = "../data/Category.csv", verbose = FALSE)
 
-dat <- fread(input = "~/Documents/GitHub/COMS6990-Final-Report/metadata/data.csv", verbose = FALSE)
-region<-fread(input = "~/Documents/GitHub/COMS6990-Final-Report/metadata/Metadata_Country_API_SH.HIV.INCD.ZS_DS2_en_csv_v2.csv", verbose = FALSE)
-category<- fread(input = "~/Documents/GitHub/COMS6990-Final-Report/metadata/Category.csv", verbose = FALSE)
-col.check <- fread(input = "~/Documents/GitHub/COMS6990-Final-Report/metadata/final_category.csv", verbose = FALSE)
-before.imputation  <- fread(input = "~/Downloads/before_imputation.csv", verbose = FALSE)
-# length(col.check$Indicator.Code)
-# length(unique(col.check$Indicator.Code))
-datatable(dat[1:10,])
-
-
-health.names <- col.check[Group == "Health service"]$Indicator.Code
-health.dat <- sub.mdat[,  ..health.names]
-health.dat[, lapply(.SD, mean.missing)]
+#datatable(dat[1:10,])
 ```
 
 ## Data cleaning
@@ -44,7 +34,7 @@ health.dat[, lapply(.SD, mean.missing)]
 The main issue with the orignal data set is the structure and structural missing data. The columns of the orignal data are time series data and each row represents a specific indicator of a country. This structure is the transpose of the structure we usually use in R.So the first step of data cleaning is to adjust this dataset into a tidy dataset.
 
 ```{r data_melt}
-#================================Missing Rate=========================
+#================================Data Reshape=========================
 ##Remove the space in column name
 old_name<-names(dat)[1:4]
 new_name<-gsub(pattern = " ",replacement = ".",x=old_name)
@@ -53,7 +43,7 @@ setnames(x=dat,old = old_name,new = new_name)
 Indicator<-dat[,3:4]
 Indicator<-Indicator[,.(Indicator.Code=unique(Indicator.Code)),by=Indicator.Name]
 sum(dat[,!is.na(V61)])
-print("V61 is an emplty column")
+#print("V61 is an emplty column")
 dat[,`:=`(Indicator.Name=NULL,V61=NULL)]
 ##Reconstruct the data 
 id.vars<-names(dat)[1:3]
@@ -63,20 +53,23 @@ mdat[, `:=`(value, mapvalues(x = value,from = "", to = NA))]
 mdat[,`:=`(year=as.numeric(year),value=as.numeric(value))]
 dcast_formula<-"Country.Code+Country.Name+year~Indicator.Code"
 mdat<-dcast(mdat[],dcast_formula)
-data.table(mdat[1:10, 1:5])
+#data.table(mdat[1:10, 1:5])
+
+cat("Original missing values are", sum(is.na(mdat)))
+cat("\n Original missing rate is", sum(is.na(mdat)) / (14448*348))
 ```
 
-Since the original data set is a humongous dataset (348 columns in total), we want to pick up the variables that are only related to our analysis. To make futher analysis easier, we will classify each indicator and group the indicator that we are going to use in following analysis. To achieve this, first we manually picked 84
 ```{r subset}
 ##Subset the indicator we want and the data from 1990-2015
-data.table(category[1:10, ])
+#data.table(category[1:10, ])
 sub_mdat_pre<-mdat[year%in%1990:2015,.SD,.SDcols=c("Country.Code","Country.Name","year",unique(category$`Indicator.Code`))]
 ##Use world bank Region Codelist to catefory data by region and subset only the region we want
 region<-region[, 1:3]
 sub_mdat_pre<-merge(x=sub_mdat_pre,y=region[,],by.y="Country Code",by.x="Country.Code",all.x=TRUE)
 sub_region<-c("Latin America & Caribbean","South Asia","Sub-Saharan Africa","Middle East & North Africa")
 sub_mdat_pre<-sub_mdat_pre[Region%in%sub_region,]
-data.table(sub_mdat_pre[])
+#data.table(sub_mdat_pre[])
+cat("Original number of countries is:", length(unique(sub_mdat_pre$Country.Code)))
 ```
 
 
@@ -89,15 +82,6 @@ missing.rate <-sub_mdat_pre[,lapply(.SD, mean.missing),by=year]
 
 # evaluate the avarage missing rate for each column
 average.missing.rate <- missing.rate[, lapply(.SD, FUN = mean)]
-
-
-
-# the length of average missing rate less than 50%
-# cat("the number of variables that missing rate more than 20% is", length(which(average.missing.rate < 0.5)))
-# 
-# cat("\n the number of current countries is", length(unique(sub_mdat_pre$Country.Name)))
-##first we want to sub set the country which have the record of Prevalence of HIV
-
 
 
 ##Data for linear regression
@@ -119,7 +103,7 @@ sub.mdat<-sub_mdat_pre[,.SD,.SDcols=c("year",chosen.variables.by.year)]
 
 ##export the data before imputing
 sub.mdat.plot.ts<-sub_mdat_pre[,]
-write.csv(x = sub.mdat, "~/Downloads/before_imputation.csv")
+#write.csv(x = sub.mdat, "~/Downloads/before_imputation.csv")
 total.missing.rate<-sub.mdat[,lapply(.SD,mean.missing),by=year]
 
 #Next we want to study the pattern of missing value rate and find out which is structural missing and which is random missing 
@@ -137,6 +121,9 @@ num.missing<-total.missing.rate[,lapply(.SD, missing.type)]
 structural.missing<-c("year",names(num.missing)[which(num.missing==1)])
 id.var<-c("year", "Country.Code","Country.Name", "Region","IncomeGroup")
 total.missing.rate[,.SD,.SDcols=c(id.var,names(num.missing)[names(num.missing)%nin%structural.missing])]
+
+#length(unique(sub.mdat.plot.ts$Country.Code))
+#(is.na(sub.mdat.plot.ts))
 ```
 
 ```{r}
@@ -200,7 +187,6 @@ datatable(data = hiv.15.49.total)
 
 ```{r}
 ##=================================Imputing by Time Series============================
-
 num.missing <- function(x) {
 return(sum(!is.na(x)))
 }
@@ -288,8 +274,10 @@ diff.impute<-(impute.after[,lapply(.SD, as.numeric)]-impute.before[,lapply(.SD,a
 parameter<-names(sub.mdat[,summary(NY.GNP.PCAP.CD)])
 diff.impute[,patameter:=parameter]
 diff.impute[,.SD,by="parameter"]
+
+cat("after time series imputation, the number of missing valuse is:", sum(is.na(sub.impute.dat)))
 ```
-From code above, we narrow down 71 variables to 49. We'll do more investigation of these these 49 variable next week.
+
 ```{r data_merging}
 # region<-as.data.table(countryRegions[,c("ISO3","REGION")])
 # mdat<-merge(x=mdat,y=region,by.y="ISO3",by.x="Country.Code",all.x=TRUE)
@@ -360,11 +348,72 @@ after.edu.finance.health <- merge(sub.impute.dat[, !(education.related.colnames)
 after.edu.finance.health$V1 <- NULL
 sub.impute.dat$V1 <- NULL
 after.imputation <- after.edu.finance.health
-write.csv(x = after.imputation, "~/Downloads/after_imputation.csv")
+#write.csv(x = after.imputation, "~/Downloads/after_imputation.csv")
+cat("the missing rate after imputation is:", sum(is.na(after.imputation)) / 101088)
 ```
 
-```{r}
-#========================================Missing Rate Comparison==================================
-sub.mdat[, lapply(.SD, mean.missing)] - sub.impute.dat[, lapply(.SD, mean.missing)] - (sub.impute.dat[, lapply(.SD, mean.missing)] - after.imputation[, lapply(.SD, mean.missing)])
+```{r adding variable}
+#===============================Adding Population===========================================
+current <- fread(input = "../data/after_imputation.csv")
+before <- fread(input = "../data/before_imputation.csv")
+population <- fread(input = "../data/population.csv")
+
+current.pop <- population[`Country Name` %in% current$Country.Name]
+chosen.year<-c("Country Name",as.character(1990:2015))
+pop.table <- current.pop[, .SD,.SDcols = chosen.year]
+
+names(pop.table)[1] <- "Country.Name"
+#which(is.na(pop.table))
+
+pop.reshape <- melt(data = pop.table, id.vars = "Country.Name", value.name = "SP.POP.TOTL")
+names(pop.reshape)[2] <- "year"
+pop.reshape[,year:=as.integer(as.character(year))]
+with.population <- merge(after.imputation, pop.reshape, by = c("Country.Name", "year"),all=TRUE)
+
+#==================divided hiv stats by population
+population.percent<- c("SH.MED.BEDS.ZS","SH.MED.NUMW.P3","SH.MED.PHYS.ZS","SH.HIV.TOTL","SH.HIV.INCD.TL","SH.DYN.AIDS","SH.HIV.INCD","SH.DYN.AIDS.DH","SH.HIV.0014","SH.HIV.INCD.14","SH.HIV.ORPH","SH.DTH.IMRT","SH.MMR.DTHS","SH.DTH.NMRT")
+with.population[,SP.POP.TOTL:=as.numeric(SP.POP.TOTL)]
+hiv.percent <- with.population[,.SD, .SDcols = population.percent]/with.population$SP.POP.TOTL*1000
+ 
+with.population.percentage <- cbind(with.population[, !(population.percent), with = FALSE],  hiv.percent)
+with.population.percentage[, `:=`(V1, NULL)]
+#write.csv(with.population.percentage, "~/Downloads/final_dat.csv")
+
+#==================================Adding population info for before_imputation data
+before.with.pop <- merge(before, pop.reshape, by = c("Country.Name", "year"), all = TRUE)
+before.with.pop[,SP.POP.TOTL:=as.numeric(SP.POP.TOTL)]
+before.hiv.percent <- before.with.pop[,.SD, .SDcols = population.percent]/with.population$SP.POP.TOTL*1000
+
+before.with.pop.per <- cbind(before.with.pop[, !(population.percent), with = FALSE], before.hiv.percent)
+before.with.pop.per[, `:=`(V1, NULL)]
+#write.csv(before.with.pop.per, "~/Downloads/final_before.csv")
 ```
+
+```{r plot}
+#==================================plot hiv info world map=====================
+library(rworldmap)
+library(RColorBrewer)
+library(VIM)
+subdat <- current[, c("year","Country.Code", "Country.Name", "SH.DYN.AIDS.ZS")]
+
+reshaped.dat <- dcast(subdat, Country.Name ~ year, value.var = "SH.DYN.AIDS.ZS")
+
+match.country <- joinCountryData2Map(reshaped.dat, joinCode="NAME", nameJoinColumn="Country.Name")
+
+colourPalette <- brewer.pal(8, 'RdPu')
+
+mapCountryData(match.country, nameColumnToPlot="2015", missingCountryCol = gray(.8), colourPalette = colourPalette, catMethod = c(0,5,10,15,20,25,30))
+
+#===================================plot missing======================
+missing_plot <- aggr(mdat, col = c('navyblue', 'red'), numbers = TRUE, sortVars = TRUE, labels = names(mdat))
+
+#=================================plot median income===============
+sub.impute.dat$V1 <- seq.int(nrow(sub.impute.dat))
+sub.impute.dat[, lapply(.SD, FUN = mean.missing), .SDcols = "NY.GNP.PCAP.CD"]
+missing <- which(is.na(sub.impute.dat$NY.GNP.PCAP.CD))
+filter.missing <- sub.impute.dat[V1 %nin% missing ]
+ggplot(filter.missing, aes(x = IncomeGroup, y = NY.GNP.PCAP.CD)) + 
+  geom_boxplot() 
+```
+
 
